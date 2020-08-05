@@ -1,6 +1,13 @@
 import numpy as np
 import cv2
 from scipy.special import expit as sigmoid
+WIDTH_NORM = 224 
+GRID_NUM = 11
+X_SPAN = WIDTH_NORM/GRID_NUM
+Y_SPAN = WIDTH_NORM/GRID_NUM
+X_NORM = WIDTH_NORM/GRID_NUM
+Y_NORM = WIDTH_NORM/GRID_NUM
+learning_rate = 1e-2
 
 def draw_boxes(img, bboxes_w_conf, color=(0, 0, 255), thick=2, draw_dot=False, radius=7):
     # Make a copy of the image
@@ -16,27 +23,39 @@ def draw_boxes(img, bboxes_w_conf, color=(0, 0, 255), thick=2, draw_dot=False, r
     # Return the image copy with boxes drawn
     return draw_img
 
-def get_boxes(nn_output, cutoff=0.2, dims=(1920, 1200)):
+def get_boxes(nn_output, dims, cutoff=0.2):
     '''
-    Extracts boxes from the network prediction with greater confidence score that 'cutoff'
+    Ekstraktira kutii so pogolema tocnost od  'cutoff'
     # Arguments
     nn_output: numpy array of shape (1573,)
-    cutoff: confidence score cutoff
+    cutoff: granicna vrednost za tocnost na rezultatite
     dims: dimensions to scale the output to. useful for images that are not the
             same dimensions as the images the network is trained on
+            
     '''
-    WIDTH_NORM = 224
-    HEIGHT_NORM = 224
-    GRID_NUM = 11
-    X_SPAN = WIDTH_NORM/GRID_NUM
-    Y_SPAN = HEIGHT_NORM/GRID_NUM
-    X_NORM = WIDTH_NORM/GRID_NUM
-    Y_NORM = HEIGHT_NORM/GRID_NUM
-    conf_scores = nn_output[363:363+242].reshape(11,11,2)
-    xywh = sigmoid(nn_output[-968:].reshape(11,11,2,4))
+    bar_low = 363
+    bar_high = bar_low+242
+    conf_scores = nn_output[bar_low:bar_high].reshape(11,11,2)
+    out_n = nn_output[-968:]
+    
+    
+    '''
+    bar_low: dolna granica za kutii
+    bar_high: gorna granica za kutii
+    968/4 = 242 kuttii
+    
+    So promena na dolnata i gornata granica treba da se zapazat i dimenziite na reshape matricite.
+    T.e. 
+    nn_output[bar_low:bar_high] za 242, dava niza dolga 242 i vooedno 11*11*2 = 242 
+    isto taka reshape(11,11,2,4) dava 11*11*2*4 = 968,
+    
+    Momentalnite granici go zadovoluvaat uslovot za "Dash Cam" detekcija, kade na slika so
+    dims=(1920, 1200) vozilata ke se najzastapeni vo tie granici. Se pod niv e nebo, se nad niv e voziloto
+    '''
+    xywh = sigmoid(out_n.reshape(11,11,2,4))
 
     indx_max_ax2 = np.argmax(conf_scores, axis=2)
-    # indx_max_ax2 looks like:
+    # indx_max_ax2 izgleda:
     # array([[0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1],
     #    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
     #    [0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1],
@@ -79,10 +98,10 @@ def get_boxes(nn_output, cutoff=0.2, dims=(1920, 1200)):
 
     bboxes = []
     for a, b, c in zip(detection_indx[:,0], detection_indx[:,1], detection_indx[:,2]):
-        x = (xywh[a,b,c,0] * X_NORM + b * X_SPAN) * dims[0]/224
-        y = (xywh[a,b,c,1] * Y_NORM + a * Y_SPAN) * dims[1]/224
-        w = (xywh[a,b,c,2] * WIDTH_NORM) * dims[0]/224
-        h = (xywh[a,b,c,3] * HEIGHT_NORM) * dims[1]/224
+        x = (xywh[a,b,c,0] * X_NORM + b * X_SPAN) * dims[0]/WIDTH_NORM
+        y = (xywh[a,b,c,1] * Y_NORM + a * Y_SPAN) * dims[1]/WIDTH_NORM
+        w = (xywh[a,b,c,2] * WIDTH_NORM) * dims[0]/WIDTH_NORM
+        h = (xywh[a,b,c,3] * WIDTH_NORM) * dims[1]/WIDTH_NORM
 
         x1, x2 = int(x-w/2), int(x+w/2)
         y1, y2 = int(y-h/2), int(y+h/2)
@@ -93,11 +112,11 @@ def get_boxes(nn_output, cutoff=0.2, dims=(1920, 1200)):
 
 def nonmax_suppression(bboxes, iou_cutoff = 0.05):
     '''
-    Suppress any overlapping boxes with IOU greater than 'iou_cutoff', keeping only
-    the one with highest confidence scores
+    Otstrani kutii shto se preklopuvaat so IOU pogolemo od 'iou_cutoff', zadrzuvajcigi 
+    samo onie so najgolema ocena
     # Arguments
-    bboxes: array of ((x1,y1), (x2,y2)), c) where c is the confidence score
-    iou_cutoff: any IOU greater than this is considered for suppression
+    bboxes: niza od ((x1,y1), (x2,y2)), c) kade c e ocenata
+    iou_cutoff: parametar za otstranuvanje na kutiite koi se spoeni, no pomali kutijata so koja se spoeni
     '''
     suppress_list = []
     max_list = []
@@ -124,7 +143,7 @@ def nonmax_suppression(bboxes, iou_cutoff = 0.05):
 
 def iou_value(box1, box2):
     '''
-    calculate the IOU of two given boxes
+    Se racuna soodnosot megju presekot od dve kutii i zaednickata golemina megju niv
     '''
     (x11, y11) , (x12, y12) = box1
     (x21, y21) , (x22, y22) = box2
